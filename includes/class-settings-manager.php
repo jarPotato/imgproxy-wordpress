@@ -29,6 +29,7 @@ class ImgproxyOptimizer_SettingsManager {
         register_setting('imgproxy_optimizer_settings', 'imgproxy_optimizer_format');
         register_setting('imgproxy_optimizer_settings', 'imgproxy_optimizer_widths');
         register_setting('imgproxy_optimizer_settings', 'imgproxy_optimizer_allowed_sources');
+        register_setting('imgproxy_optimizer_settings', 'imgproxy_optimizer_use_base64');
         register_setting('imgproxy_optimizer_settings', 'imgproxy_optimizer_enabled');
 
         add_settings_section(
@@ -138,6 +139,18 @@ class ImgproxyOptimizer_SettingsManager {
                 'description' => 'Enter domains/URLs (one per line) that are allowed for image optimization. Leave empty to allow all images. Examples:<br>example.com<br>cdn.example.com<br>*.cloudfront.net'
             )
         );
+
+        add_settings_field(
+            'imgproxy_optimizer_use_base64',
+            'Use Base64 URL Encoding',
+            array($this, 'checkbox_field'),
+            'imgproxy_optimizer_settings',
+            'imgproxy_optimizer_main',
+            array(
+                'option_name' => 'imgproxy_optimizer_use_base64',
+                'description' => 'Enable to use base64 encoded URLs with appended filenames. Disable for plain URL format.'
+            )
+        );
     }
 
     public function section_callback() {
@@ -200,11 +213,17 @@ class ImgproxyOptimizer_SettingsManager {
 
     public function checkbox_field($args) {
         $option_name = $args['option_name'];
-        $value = get_option($option_name, 1);
+        $default_value = ($option_name === 'imgproxy_optimizer_use_base64') ? 1 : 1;
+        $value = get_option($option_name, $default_value);
         $description = isset($args['description']) ? $args['description'] : '';
         
+        $label_text = 'Enable image optimization';
+        if ($option_name === 'imgproxy_optimizer_use_base64') {
+            $label_text = 'Use base64 URL encoding';
+        }
+        
         echo '<input type="checkbox" id="' . esc_attr($option_name) . '" name="' . esc_attr($option_name) . '" value="1"' . checked($value, 1, false) . ' />';
-        echo '<label for="' . esc_attr($option_name) . '">Enable image optimization</label>';
+        echo '<label for="' . esc_attr($option_name) . '">' . esc_html($label_text) . '</label>';
         if (!empty($description)) {
             echo '<p class="description">' . esc_html($description) . '</p>';
         }

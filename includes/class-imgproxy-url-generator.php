@@ -11,6 +11,7 @@ class ImgproxyOptimizer_ImgproxyUrlGenerator {
     private $salt;
     private $quality;
     private $format;
+    private $use_base64;
 
     public function __construct() {
         $this->base_url = rtrim(get_option('imgproxy_optimizer_url', ''), '/');
@@ -18,17 +19,13 @@ class ImgproxyOptimizer_ImgproxyUrlGenerator {
         $this->salt = get_option('imgproxy_optimizer_salt', '');
         $this->quality = get_option('imgproxy_optimizer_quality', 65);
         $this->format = get_option('imgproxy_optimizer_format', 'avif');
+        $this->use_base64 = get_option('imgproxy_optimizer_use_base64', 1);
     }
 
     public function generate_url($image_url, $width = 0, $height = 0, $resize_type = 'fit') {
         if (empty($this->base_url) || empty($this->key) || empty($this->salt)) {
             return $image_url;
         }
-
-        // Parse the image URL to get filename and extension
-        $parsed_url = parse_url($image_url);
-        $path_info = pathinfo($parsed_url['path']);
-        $filename = isset($path_info['filename']) ? $path_info['filename'] : 'image';
 
         // Build the processing options
         $options = array(
@@ -41,11 +38,21 @@ class ImgproxyOptimizer_ImgproxyUrlGenerator {
 
         $processing_options = '/' . implode('/', $options);
 
-        // Base64 encode the source URL
-        $encoded_url = rtrim(strtr(base64_encode($image_url), '+/', '-_'), '=');
+        if ($this->use_base64) {
+            // Base64 encoded URL format with filename
+            $parsed_url = parse_url($image_url);
+            $path_info = pathinfo($parsed_url['path']);
+            $filename = isset($path_info['filename']) ? $path_info['filename'] : 'image';
 
-        // Build the path without signature
-        $path = $processing_options . '/' . $encoded_url . '/' . $filename . '.' . $this->format;
+            // Base64 encode the source URL
+            $encoded_url = rtrim(strtr(base64_encode($image_url), '+/', '-_'), '=');
+
+            // Build the path without signature
+            $path = $processing_options . '/' . $encoded_url . '/' . $filename . '.' . $this->format;
+        } else {
+            // Plain URL format
+            $path = $processing_options . '/plain/' . $image_url;
+        }
 
         // Generate HMAC signature
         $signature = $this->generate_signature($path);
