@@ -50,8 +50,10 @@ class ImgproxyOptimizer_ImgproxyUrlGenerator {
             // Build the path without signature
             $path = $processing_options . '/' . $encoded_url . '/' . $filename . '.' . $this->format;
         } else {
-            // Plain URL format
-            $path = $processing_options . '/plain/' . $image_url;
+            // Plain URL format - encode spaces to %20 for proper signature calculation
+            // This ensures the signature matches what imgproxy receives after URL encoding
+            $encoded_image_url = str_replace(' ', '%20', $image_url);
+            $path = $processing_options . '/plain/' . $encoded_image_url;
         }
 
         // Generate HMAC signature
