@@ -85,6 +85,7 @@ class ImgproxyOptimizer {
         add_option('imgproxy_optimizer_quality', 65);
         add_option('imgproxy_optimizer_format', 'avif');
         add_option('imgproxy_optimizer_widths', '320,640,768,1024,1280,1920');
+        add_option('imgproxy_optimizer_allowed_sources', '');
         add_option('imgproxy_optimizer_enabled', 1);
     }
 
@@ -101,6 +102,7 @@ class ImgproxyOptimizer {
         delete_option('imgproxy_optimizer_quality');
         delete_option('imgproxy_optimizer_format');
         delete_option('imgproxy_optimizer_widths');
+        delete_option('imgproxy_optimizer_allowed_sources');
         delete_option('imgproxy_optimizer_enabled');
     }
 }

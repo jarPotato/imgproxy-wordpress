@@ -28,6 +28,7 @@ class ImgproxyOptimizer_SettingsManager {
         register_setting('imgproxy_optimizer_settings', 'imgproxy_optimizer_quality');
         register_setting('imgproxy_optimizer_settings', 'imgproxy_optimizer_format');
         register_setting('imgproxy_optimizer_settings', 'imgproxy_optimizer_widths');
+        register_setting('imgproxy_optimizer_settings', 'imgproxy_optimizer_allowed_sources');
         register_setting('imgproxy_optimizer_settings', 'imgproxy_optimizer_enabled');
 
         add_settings_section(
@@ -125,6 +126,18 @@ class ImgproxyOptimizer_SettingsManager {
                 'description' => 'Comma-separated list of widths for responsive images (e.g., 320,640,768,1024,1280,1920)'
             )
         );
+
+        add_settings_field(
+            'imgproxy_optimizer_allowed_sources',
+            'Allowed Image Sources',
+            array($this, 'textarea_field'),
+            'imgproxy_optimizer_settings',
+            'imgproxy_optimizer_main',
+            array(
+                'option_name' => 'imgproxy_optimizer_allowed_sources',
+                'description' => 'Enter domains/URLs (one per line) that are allowed for image optimization. Leave empty to allow all images. Examples:<br>example.com<br>cdn.example.com<br>*.cloudfront.net'
+            )
+        );
     }
 
     public function section_callback() {
@@ -171,6 +184,17 @@ class ImgproxyOptimizer_SettingsManager {
         echo '</select>';
         if (!empty($description)) {
             echo '<p class="description">' . esc_html($description) . '</p>';
+        }
+    }
+
+    public function textarea_field($args) {
+        $option_name = $args['option_name'];
+        $value = get_option($option_name, '');
+        $description = isset($args['description']) ? $args['description'] : '';
+        
+        echo '<textarea id="' . esc_attr($option_name) . '" name="' . esc_attr($option_name) . '" rows="5" cols="50" class="large-text">' . esc_textarea($value) . '</textarea>';
+        if (!empty($description)) {
+            echo '<p class="description">' . wp_kses($description, array('br' => array())) . '</p>';
         }
     }
 

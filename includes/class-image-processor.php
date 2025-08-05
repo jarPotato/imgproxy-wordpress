@@ -140,17 +140,53 @@ class ImgproxyOptimizer_ImageProcessor {
             return false;
         }
 
-        // Skip if already absolute external URL (only process local or relative URLs)
-        if (preg_match('/^https?:\/\//', $src)) {
-            $site_url = site_url();
-            $site_host = parse_url($site_url, PHP_URL_HOST);
-            $img_host = parse_url($src, PHP_URL_HOST);
-            
-            // Only process if it's from the same domain
-            return $img_host === $site_host;
+        // Get allowed sources setting
+        $allowed_sources = get_option('imgproxy_optimizer_allowed_sources', '');
+        
+        // If no allowed sources specified, default to current site only
+        if (empty(trim($allowed_sources))) {
+            if (preg_match('/^https?:\/\//', $src)) {
+                $site_url = site_url();
+                $site_host = parse_url($site_url, PHP_URL_HOST);
+                $img_host = parse_url($src, PHP_URL_HOST);
+                
+                return $img_host === $site_host;
+            }
+            return true; // Allow relative URLs
         }
 
-        return true;
+        // Parse allowed sources
+        $allowed_domains = array_filter(array_map('trim', explode("\n", $allowed_sources)));
+        
+        // For relative URLs, always allow
+        if (!preg_match('/^https?:\/\//', $src)) {
+            return true;
+        }
+
+        // Check if the image URL matches any allowed source
+        $img_host = parse_url($src, PHP_URL_HOST);
+        if (!$img_host) {
+            return false;
+        }
+
+        foreach ($allowed_domains as $allowed_domain) {
+            if (empty($allowed_domain)) continue;
+            
+            // Handle wildcard domains (e.g., *.cloudfront.net)
+            if (strpos($allowed_domain, '*') !== false) {
+                $pattern = str_replace('*', '.*', preg_quote($allowed_domain, '/'));
+                if (preg_match('/^' . $pattern . '$/i', $img_host)) {
+                    return true;
+                }
+            } else {
+                // Exact domain match
+                if (strcasecmp($img_host, $allowed_domain) === 0) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private function is_imgproxy_url($url) {
