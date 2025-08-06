@@ -62,9 +62,35 @@ class ImgproxyOptimizer {
     }
 
     public function start_output_buffering() {
-        if (!is_admin() && !is_feed() && !is_robots() && !is_trackback()) {
+        // Exclude admin, REST API, AJAX, feeds, robots, trackbacks, and CLI requests
+        if (!is_admin() && 
+            !is_feed() && 
+            !is_robots() && 
+            !is_trackback() &&
+            !wp_doing_ajax() &&
+            !defined('REST_REQUEST') &&
+            !defined('WP_CLI') &&
+            !$this->is_json_request()) {
             ob_start(array($this->image_processor, 'process_html'));
         }
+    }
+
+    private function is_json_request() {
+        // Check if this is a JSON request by examining headers and content type
+        if (isset($_SERVER['CONTENT_TYPE']) && strpos($_SERVER['CONTENT_TYPE'], 'application/json') !== false) {
+            return true;
+        }
+        
+        if (isset($_SERVER['HTTP_ACCEPT']) && strpos($_SERVER['HTTP_ACCEPT'], 'application/json') !== false) {
+            return true;
+        }
+        
+        // Check for wp-json in the request URI
+        if (isset($_SERVER['REQUEST_URI']) && strpos($_SERVER['REQUEST_URI'], 'wp-json') !== false) {
+            return true;
+        }
+        
+        return false;
     }
 
     public function add_dns_prefetch() {
