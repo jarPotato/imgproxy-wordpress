@@ -20,69 +20,72 @@ class ImgproxyOptimizer_ImageProcessor {
             return $html;
         }
 
-        // Use DOMDocument to parse HTML
-        libxml_use_internal_errors(true);
-        $dom = new DOMDocument();
-        $dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
-        
-        $images = $dom->getElementsByTagName('img');
-        $images_array = array();
-        
-        // Convert NodeList to array to avoid live list issues
-        foreach ($images as $img) {
-            $images_array[] = $img;
+        // Use regex-based approach to avoid HTML corruption issues with DOMDocument
+        try {
+            return $this->process_html_safe($html);
+        } catch (Exception $e) {
+            // Fallback to original HTML if processing fails
+            error_log('ImgproxyOptimizer: Failed to process HTML - ' . $e->getMessage());
+            return $html;
         }
-
-        foreach ($images_array as $img) {
-            $this->process_image_element($img);
-        }
-
-        // Get the processed HTML
-        $processed_html = $dom->saveHTML();
-        
-        // Remove the XML encoding declaration if it exists
-        $processed_html = preg_replace('/^<\?xml[^>]+>/', '', $processed_html);
-        
-        return $processed_html;
     }
 
-    private function process_image_element($img) {
-        $src = $img->getAttribute('src');
+    private function process_html_safe($html) {
+        // Find all img tags using regex
+        $pattern = '/<img\s+([^>]*?)>/i';
+        
+        return preg_replace_callback($pattern, array($this, 'process_image_tag_callback'), $html);
+    }
+
+    private function process_image_tag_callback($matches) {
+        $full_tag = $matches[0];
+        $attributes = $matches[1];
+        
+        // Parse attributes into an array
+        $attrs = $this->parse_image_attributes($attributes);
         
         // Skip if no src or if it's already an imgproxy URL
-        if (empty($src) || $this->is_imgproxy_url($src)) {
-            return;
+        if (empty($attrs['src']) || $this->is_imgproxy_url($attrs['src'])) {
+            return $full_tag;
         }
 
         // Skip external images unless they're from allowed domains
-        if (!$this->should_process_image($src)) {
-            return;
+        if (!$this->should_process_image($attrs['src'])) {
+            return $full_tag;
         }
 
         // Get image dimensions
-        $width = $img->getAttribute('width');
-        $height = $img->getAttribute('height');
-        $width = !empty($width) ? intval($width) : 0;
-        $height = !empty($height) ? intval($height) : 0;
+        $width = isset($attrs['width']) ? intval($attrs['width']) : 0;
+        $height = isset($attrs['height']) ? intval($attrs['height']) : 0;
 
         // Check for priority loading
-        $is_priority = $this->is_priority_image($img);
+        $is_priority = $this->is_priority_image_from_attrs($attrs);
 
         // Generate optimized src
         if ($width > 0 || $height > 0) {
-            // Use specified dimensions
-            $optimized_src = $this->url_generator->generate_url($src, $width, 0, 'fit');
+            $optimized_src = $this->url_generator->generate_url($attrs['src'], $width, 0, 'fit');
         } else {
-            // No dimensions specified, let imgproxy auto-size
-            $optimized_src = $this->url_generator->generate_url($src, 0, 0, 'fit');
+            $optimized_src = $this->url_generator->generate_url($attrs['src'], 0, 0, 'fit');
         }
 
-        // Update the src attribute
-        $img->setAttribute('src', $optimized_src);
+        // Store original src for srcset generation
+        $original_src = $attrs['src'];
+        
+        // Update attributes
+        $attrs['src'] = $optimized_src;
 
         // Generate and set srcset for responsive images
         if ($width > 0) {
-            $this->add_srcset_to_image($img, $src, $width);
+            $widths = get_option('imgproxy_optimizer_widths', '320,640,768,1024,1280,1920');
+            $srcset = $this->url_generator->generate_srcset($original_src, $widths, $width);
+            if (!empty($srcset)) {
+                $attrs['srcset'] = $srcset;
+                
+                // Add sizes attribute if not present
+                if (!isset($attrs['sizes'])) {
+                    $attrs['sizes'] = '(max-width: ' . $width . 'px) 100vw, ' . $width . 'px';
+                }
+            }
         }
 
         // Add to preload list if priority
@@ -95,44 +98,70 @@ class ImgproxyOptimizer_ImageProcessor {
         }
 
         // Ensure loading attribute is set appropriately
-        if (!$img->hasAttribute('loading')) {
-            $img->setAttribute('loading', $is_priority ? 'eager' : 'lazy');
+        if (!isset($attrs['loading'])) {
+            $attrs['loading'] = $is_priority ? 'eager' : 'lazy';
         }
+
+        // Rebuild the img tag with updated attributes
+        return $this->rebuild_image_tag($attrs);
     }
 
-    private function add_srcset_to_image($img, $original_src, $original_width) {
-        $widths = get_option('imgproxy_optimizer_widths', '320,640,768,1024,1280,1920');
-        $srcset = $this->url_generator->generate_srcset($original_src, $widths, $original_width);
+    private function parse_image_attributes($attr_string) {
+        $attributes = array();
         
-        if (!empty($srcset)) {
-            $img->setAttribute('srcset', $srcset);
-            
-            // Add sizes attribute if not present
-            if (!$img->hasAttribute('sizes')) {
-                $img->setAttribute('sizes', '(max-width: ' . $original_width . 'px) 100vw, ' . $original_width . 'px');
+        // Match attribute="value" or attribute='value' or attribute=value
+        preg_match_all('/(\w+)(?:\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+)))?/i', $attr_string, $matches, PREG_SET_ORDER);
+        
+        foreach ($matches as $match) {
+            $name = strtolower($match[1]);
+            $value = isset($match[2]) && $match[2] !== '' ? $match[2] : 
+                    (isset($match[3]) && $match[3] !== '' ? $match[3] : 
+                    (isset($match[4]) && $match[4] !== '' ? $match[4] : ''));
+            $attributes[$name] = $value;
+        }
+        
+        return $attributes;
+    }
+
+    private function rebuild_image_tag($attrs) {
+        $tag = '<img';
+        
+        foreach ($attrs as $name => $value) {
+            if ($value === '') {
+                // Handle boolean attributes (like 'required', 'disabled', etc.)
+                $tag .= ' ' . $name;
+            } else {
+                $tag .= ' ' . $name . '="' . esc_attr($value) . '"';
             }
         }
+        
+        $tag .= '>';
+        return $tag;
     }
 
-    private function is_priority_image($img) {
+    private function is_priority_image_from_attrs($attrs) {
         // Check for fetchpriority="high"
-        if ($img->getAttribute('fetchpriority') === 'high') {
+        if (isset($attrs['fetchpriority']) && $attrs['fetchpriority'] === 'high') {
             return true;
         }
 
         // Check for loading="eager"
-        if ($img->getAttribute('loading') === 'eager') {
+        if (isset($attrs['loading']) && $attrs['loading'] === 'eager') {
             return true;
         }
 
         // Check for priority class or data attribute
-        $class = $img->getAttribute('class');
-        if (strpos($class, 'priority') !== false || strpos($class, 'hero') !== false) {
-            return true;
+        if (isset($attrs['class'])) {
+            $class = $attrs['class'];
+            if (strpos($class, 'priority') !== false || strpos($class, 'hero') !== false) {
+                return true;
+            }
         }
 
         return false;
     }
+
+
 
     private function should_process_image($src) {
         // Skip data URLs
