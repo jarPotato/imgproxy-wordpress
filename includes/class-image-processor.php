@@ -39,54 +39,46 @@ class ImgproxyOptimizer_ImageProcessor {
 
     private function process_image_tag_callback($matches) {
         $full_tag = $matches[0];
-        $attributes = $matches[1];
         
-        // Parse attributes into an array
-        $attrs = $this->parse_image_attributes($attributes);
+        // Extract src attribute value using regex (surgical approach)
+        // Use negative lookbehind to avoid matching :src (Alpine.js dynamic attribute)
+        $src_pattern = '/(?<!:)\bsrc\s*=\s*(["\'])([^"\']+)\1/i';
+        if (!preg_match($src_pattern, $full_tag, $src_matches)) {
+            return $full_tag; // No src attribute found
+        }
         
-        // Skip if no src or if it's already an imgproxy URL
-        if (empty($attrs['src']) || $this->is_imgproxy_url($attrs['src'])) {
+        $quote_char = $src_matches[1]; // Preserve original quote style
+        $original_src = $src_matches[2];
+        
+        // Skip if it's already an imgproxy URL
+        if ($this->is_imgproxy_url($original_src)) {
             return $full_tag;
         }
 
         // Skip external images unless they're from allowed domains
-        if (!$this->should_process_image($attrs['src'])) {
+        if (!$this->should_process_image($original_src)) {
             return $full_tag;
         }
 
-        // Get image dimensions
-        $width = isset($attrs['width']) ? intval($attrs['width']) : 0;
-        $height = isset($attrs['height']) ? intval($attrs['height']) : 0;
-
-        // Check for priority loading
-        $is_priority = $this->is_priority_image_from_attrs($attrs);
+        // Extract dimensions for optimization (optional, for width/height-specific optimization)
+        $width = 0;
+        $height = 0;
+        if (preg_match('/\bwidth\s*=\s*["\']?(\d+)["\']?/i', $full_tag, $width_match)) {
+            $width = intval($width_match[1]);
+        }
+        if (preg_match('/\bheight\s*=\s*["\']?(\d+)["\']?/i', $full_tag, $height_match)) {
+            $height = intval($height_match[1]);
+        }
 
         // Generate optimized src
         if ($width > 0 || $height > 0) {
-            $optimized_src = $this->url_generator->generate_url($attrs['src'], $width, 0, 'fit');
+            $optimized_src = $this->url_generator->generate_url($original_src, $width, 0, 'fit');
         } else {
-            $optimized_src = $this->url_generator->generate_url($attrs['src'], 0, 0, 'fit');
+            $optimized_src = $this->url_generator->generate_url($original_src, 0, 0, 'fit');
         }
 
-        // Store original src for srcset generation
-        $original_src = $attrs['src'];
-        
-        // Update attributes
-        $attrs['src'] = $optimized_src;
-
-        // Generate and set srcset for responsive images
-        if ($width > 0) {
-            $widths = get_option('imgproxy_optimizer_widths', '320,640,768,1024,1280,1920');
-            $srcset = $this->url_generator->generate_srcset($original_src, $widths, $width);
-            if (!empty($srcset)) {
-                $attrs['srcset'] = $srcset;
-                
-                // Add sizes attribute if not present
-                if (!isset($attrs['sizes'])) {
-                    $attrs['sizes'] = '(max-width: ' . $width . 'px) 100vw, ' . $width . 'px';
-                }
-            }
-        }
+        // Check for priority loading (minimal extraction needed)
+        $is_priority = $this->is_priority_image_from_tag($full_tag);
 
         // Add to preload list if priority
         if ($is_priority) {
@@ -97,63 +89,57 @@ class ImgproxyOptimizer_ImageProcessor {
             );
         }
 
-        // Ensure loading attribute is set appropriately
-        if (!isset($attrs['loading'])) {
-            $attrs['loading'] = $is_priority ? 'eager' : 'lazy';
-        }
+        // Start with the original tag
+        $updated_tag = $full_tag;
+        
+        // Replace src attribute value (preserving quotes and everything else)
+        $updated_tag = preg_replace($src_pattern, 'src=' . $quote_char . $optimized_src . $quote_char, $updated_tag);
 
-        // Rebuild the img tag with updated attributes
-        return $this->rebuild_image_tag($attrs);
-    }
-
-    private function parse_image_attributes($attr_string) {
-        $attributes = array();
-        
-        // Match attribute="value" or attribute='value' or attribute=value
-        // Use negative lookbehind (?<!:) to avoid matching attributes like ":src"
-        preg_match_all('/(?<!:)\b([a-zA-Z][a-zA-Z0-9-]*)\s*(?:=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+)))?/i', $attr_string, $matches, PREG_SET_ORDER);
-        
-        foreach ($matches as $match) {
-            $name = strtolower($match[1]);
-            $value = isset($match[2]) && $match[2] !== '' ? $match[2] : 
-                    (isset($match[3]) && $match[3] !== '' ? $match[3] : 
-                    (isset($match[4]) && $match[4] !== '' ? $match[4] : ''));
-            $attributes[$name] = $value;
-        }
-        
-        return $attributes;
-    }
-
-    private function rebuild_image_tag($attrs) {
-        $tag = '<img';
-        
-        foreach ($attrs as $name => $value) {
-            if ($value === '') {
-                // Handle boolean attributes (like 'required', 'disabled', etc.)
-                $tag .= ' ' . $name;
-            } else {
-                $tag .= ' ' . $name . '="' . esc_attr($value) . '"';
+        // Handle srcset generation if width is available
+        if ($width > 0) {
+            $widths = get_option('imgproxy_optimizer_widths', '320,640,768,1024,1280,1920');
+            $srcset = $this->url_generator->generate_srcset($original_src, $widths, $width);
+            if (!empty($srcset)) {
+                // Check if srcset already exists and replace it, or add it
+                if (preg_match('/\bsrcset\s*=\s*(["\'])([^"\']*)\1/i', $updated_tag)) {
+                    $updated_tag = preg_replace('/\bsrcset\s*=\s*(["\'])([^"\']*)\1/i', 'srcset=$1' . $srcset . '$1', $updated_tag);
+                } else {
+                    // Add srcset after src attribute
+                    $updated_tag = preg_replace('/(\bsrc\s*=\s*["\'][^"\']+["\'])/', '$1 srcset="' . $srcset . '"', $updated_tag);
+                }
+                
+                // Add sizes attribute if not present
+                if (!preg_match('/\bsizes\s*=/i', $updated_tag)) {
+                    $sizes_value = '(max-width: ' . $width . 'px) 100vw, ' . $width . 'px';
+                    $updated_tag = preg_replace('/(\bsrcset\s*=\s*["\'][^"\']+["\'])/', '$1 sizes="' . $sizes_value . '"', $updated_tag);
+                }
             }
         }
-        
-        $tag .= '>';
-        return $tag;
+
+        // Add loading attribute if not present
+        if (!preg_match('/\bloading\s*=/i', $updated_tag)) {
+            $loading_value = $is_priority ? 'eager' : 'lazy';
+            // Add loading attribute before the closing >
+            $updated_tag = preg_replace('/\s*>$/', ' loading="' . $loading_value . '">', $updated_tag);
+        }
+
+        return $updated_tag;
     }
 
-    private function is_priority_image_from_attrs($attrs) {
+    private function is_priority_image_from_tag($tag) {
         // Check for fetchpriority="high"
-        if (isset($attrs['fetchpriority']) && $attrs['fetchpriority'] === 'high') {
+        if (preg_match('/\bfetchpriority\s*=\s*["\']?high["\']?/i', $tag)) {
             return true;
         }
 
         // Check for loading="eager"
-        if (isset($attrs['loading']) && $attrs['loading'] === 'eager') {
+        if (preg_match('/\bloading\s*=\s*["\']?eager["\']?/i', $tag)) {
             return true;
         }
 
-        // Check for priority class or data attribute
-        if (isset($attrs['class'])) {
-            $class = $attrs['class'];
+        // Check for priority or hero class
+        if (preg_match('/\bclass\s*=\s*["\']([^"\']*)["\']/', $tag, $class_matches)) {
+            $class = $class_matches[1];
             if (strpos($class, 'priority') !== false || strpos($class, 'hero') !== false) {
                 return true;
             }
@@ -161,6 +147,7 @@ class ImgproxyOptimizer_ImageProcessor {
 
         return false;
     }
+
 
 
 
