@@ -110,7 +110,8 @@ class ImgproxyOptimizer_ImageProcessor {
         $attributes = array();
         
         // Match attribute="value" or attribute='value' or attribute=value
-        preg_match_all('/\b([a-zA-Z][a-zA-Z0-9-]*)\s*(?:=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+)))?/i', $attr_string, $matches, PREG_SET_ORDER);
+        // Use negative lookbehind (?<!:) to avoid matching attributes like ":src"
+        preg_match_all('/(?<!:)\b([a-zA-Z][a-zA-Z0-9-]*)\s*(?:=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+)))?/i', $attr_string, $matches, PREG_SET_ORDER);
         
         foreach ($matches as $match) {
             $name = strtolower($match[1]);
